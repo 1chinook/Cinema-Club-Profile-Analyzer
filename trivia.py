@@ -1,0 +1,22 @@
+TRIVIA_LIST = [
+    "The Godfather'da 'Don Corleone' rolündeki Marlon Brando, repliklerini ezberlemediği için sahne arkasında kartonlardan okumuştur.",
+    "Psycho (1960) filmindeki meşhur duş sahnesinin ses efekti için onlarca farklı boyutta kavun bıçaklanmıştır.",
+    "Interstellar'daki 'Gargantua' kara delik simülasyonları o kadar hassastı ki astrofizik alanında yeni akademik makalelere temel oluşturdu.",
+    "The Dark Knight'taki hastane patlaması sahnesinde Heath Ledger'ın patlamayan fünyeyle oynadığı anlar tamamen doğaçlamadır.",
+    "Fight Club'ın neredeyse her sahnesinde arka planda en az bir adet Starbucks karton bardağı görünür.",
+    "Stanley Kubrick, The Shining'deki kapı kırma sahnesi için Jack Nicholson'a tam 60 adet gerçek ahşap kapı kırdırmıştır.",
+    "Pulp Fiction'daki meşhur parlayan çantanın içinde senaryoda ne olduğu asla açıklanmamıştır; sette sadece sarı bir ampul ve akü kullanılmıştır.",
+    "Lord of the Rings: The Two Towers çekimlerinde Viggo Mortensen, ork miğferine tekme attığı sahnede ayak parmağını gerçekten kırmıştır.",
+    "La La Land'in açılışındaki otoyol dans sahnesi, trafiğe kapatılmış gerçek bir Los Angeles köprüsünde 40 derece sıcaklıkta çekilmiştir.",
+    "Alien (1979) filmindeki göğüs parçalama sahnesinden oyuncuların haberi yoktu; kadronun yüzündeki dehşet tamamen gerçektir.",
+    "Schindler's List filmi için Steven Spielberg, 'kan parası' kabul edeceğini belirterek yönetmenlik maaşı almayı reddetmiştir.",
+    "Whiplash filmindeki final davul solosu sırasında Miles Teller'ın bagetlere bulaşan kanları makyaj değil, aşırı efordan kaynaklı gerçek kanamadır.",
+    "Goodfellas filminde Joe Pesci'nin annesini oynayan kişi, yönetmen Martin Scorsese'nin öz annesi Catherine Scorsese'dir.",
+    "Apocalypse Now çekimleri o kadar kaotik geçmiştir ki Francis Ford Coppola çekimler sırasında yaklaşık 45 kilo kaybetmiştir.",
+    "Taxi Driver'daki ikonik 'You talkin' to me?' tiradı senaryoda yoktu; Robert De Niro ayna karşısında tamamen doğaçlama yapmıştır.",
+    "2001: A Space Odyssey filmi 1968 yılında, insanoğlu henüz Ay'a ayak basmadan bir yıl önce vizyona girmiştir.",
+    "Blade Runner'da Roy Batty karakterini canlandıran Rutger Hauer, efsanevi 'Tears in rain' monoloğunun son iki cümlesini sete çıkmadan hemen önce kendisi yazmıştır.",
+    "The Matrix'in yeşil dijital kod yağmuru, prodüksiyon tasarımcısının eşinin Japonca suşi tarifleri kitabından taranan karakterlerden oluşur.",
+    "No Country for Old Men ve There Will Be Blood aynı dönemde komşu Teksas kasabalarında çekilmiş; birinin set dumanı diğerinin çekimini durdurmuştur.",
+    "Fargo filminin başında yazan 'Bu gerçek bir hikayedir' ibaresi tamamen Coen Kardeşler'in izleyiciyi havaya sokmak için uydurduğu bir aldatmacadır."
+]
