@@ -317,8 +317,10 @@ async def fetch_user_films_fast(username: str) -> dict:
         try:
             res = await session.get(first_url, timeout=15.0)
             if res.status_code != 200:
-                print(f"[{username}] 1. sayfa alınamadı. HTTP {res.status_code}")
-                return {}
+              print(f"[{username}] HTTP {res.status_code}")
+              print(f"[{username}] Headers: {dict(res.headers)}")
+              print(f"[{username}] Body: {res.text[:1000]}")
+              return {}
         except Exception as e:
             print(f"[{username}] Bağlantı hatası: {e}")
             return {}
@@ -329,7 +331,7 @@ async def fetch_user_films_fast(username: str) -> dict:
         print(f"[{username}] Toplam {total_pages} sayfa tespit edildi. Paralel çekim başlatılıyor...")
 
         if total_pages > 1:
-            sem = asyncio.Semaphore(4)
+            sem = asyncio.Semaphore(2)
             tasks = [
                 fetch_single_page(session, username, p, sem)
                 for p in range(2, total_pages + 1)
