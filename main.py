@@ -1,15 +1,23 @@
 import asyncio
-import traceback
-import time
 import re
 import json
+import logging
+from typing import Optional
+from cachetools import TTLCache
+from curl_cffi.requests import AsyncSession
+from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from curl_cffi.requests import AsyncSession
-from bs4 import BeautifulSoup
-from trivia import TRIVIA_LIST
+
+try:
+    from trivia import TRIVIA_LIST
+except ImportError:
+    TRIVIA_LIST = ["Letterboxd verileri taranıyor..."]
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("kadrajdas")
 
 app = FastAPI(title="Kadrajdaş | Kült Sinema Kulübü")
 
@@ -21,8 +29,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-USER_CACHE: dict[str, tuple[float, dict]] = {}
-CACHE_TTL = 600  # 10 dakika (saniye)
+# Bellek şişmesini önleyen bounded TTL Cache (Max 500 kullanıcı, 600 saniye TTL)
+USER_CACHE: TTLCache = TTLCache(maxsize=500, ttl=600)
 
 HTML_CONTENT = """<!DOCTYPE html>
 <html lang="tr">
@@ -73,7 +81,6 @@ HTML_CONTENT = """<!DOCTYPE html>
       <span>Filmleri Karşılaştır</span>
     </button>
 
-    <!-- Loading State & Trivia Box -->
     <div id="loader" class="hidden mt-6 text-center py-6">
       <div class="inline-block w-8 h-8 border-4 border-zinc-700 border-t-green-500 rounded-full animate-spin mb-3"></div>
       <div class="max-w-md mx-auto bg-zinc-950/60 border border-zinc-800 rounded-xl p-4 mt-2">
@@ -198,8 +205,8 @@ HTML_CONTENT = """<!DOCTYPE html>
         }
 
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-        document.getElementById("timeDisplay").innerText = `Analiz süresi: ${elapsed} sn (${data.user1_total} ve ${data.user2_total} film)`;
         document.getElementById("scoreDisplay").innerText = `%${data.score}`;
+        document.getElementById("timeDisplay").innerText = `${elapsed} saniyede hesaplandı`;
         document.getElementById("commonCountDisplay").innerText = data.common_count;
         document.getElementById("overlapDisplay").innerText = `%${data.overlap_pct}`;
         document.getElementById("ratingScoreDisplay").innerText = `%${data.rating_pct}`;
@@ -228,7 +235,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 </html>
 """
 
-def extract_rating(element) -> float | None:
+def extract_rating(element) -> Optional[float]:
     if element is None:
         return None
     rating_elem = element.select_one("span.rating, p.poster-viewingdata span.rating, span.rating-micro")
@@ -246,13 +253,19 @@ def extract_rating(element) -> float | None:
                 return float(stars)
     return None
 
-def parse_films_from_html(html_text: str) -> dict:
-    soup = BeautifulSoup(html_text, "html.parser")
+def parse_films_from_html(html_text: str) -> dict[str, Optional[float]]:
+    # 'lxml' ayrıştırma performansı html.parser'a göre daha yüksektir.
+    parser_type = "lxml"
+    try:
+        soup = BeautifulSoup(html_text, parser_type)
+    except Exception:
+        soup = BeautifulSoup(html_text, "html.parser")
+
     items = soup.select("ul.poster-list li, grid-item, li.poster-container")
     if not items:
         items = soup.select("div[data-film-slug], div[data-target-link]")
 
-    page_films = {}
+    page_films: dict[str, Optional[float]] = {}
     for item in items:
         film_div = item if item.name == "div" and (item.get("data-film-slug") or item.get("data-target-link")) else item.find("div", attrs={"data-film-slug": True})
         if not film_div:
@@ -284,64 +297,73 @@ def parse_films_from_html(html_text: str) -> dict:
     return page_films
 
 def extract_total_pages(html_text: str) -> int:
-    soup = BeautifulSoup(html_text, "html.parser")
-    paginate = soup.select("div.paginate-pages ul li a")
+    parser_type = "lxml"
+    try:
+        soup = BeautifulSoup(html_text, parser_type)
+    except Exception:
+        soup = BeautifulSoup(html_text, "html.parser")
+
+    paginate_links = soup.select("div.paginate-pages ul li a")
     max_p = 1
-    for a in paginate:
+    for a in paginate_links:
+        # Sayfalama bağlantılarındaki /page/X/ yapısını kontrol et
+        href = a.get("href", "")
+        match = re.search(r"/page/(\d+)/", href)
+        if match:
+            max_p = max(max_p, int(match.group(1)))
         text = a.get_text(strip=True)
         if text.isdigit():
             max_p = max(max_p, int(text))
     return max_p
 
-async def fetch_single_page(session: AsyncSession, username: str, page: int, sem: asyncio.Semaphore) -> dict:
+async def fetch_single_page(session: AsyncSession, username: str, page: int, sem: asyncio.Semaphore) -> tuple[int, Optional[dict]]:
     async with sem:
         url = f"https://letterboxd.com/{username}/films/page/{page}/"
         try:
             res = await session.get(url, timeout=12.0)
             if res.status_code == 200:
-                return parse_films_from_html(res.text)
-        except Exception:
-            pass
-        return {}
+                return page, parse_films_from_html(res.text)
+            logger.warning(f"[{username}] Sayfa {page} alınamadı: HTTP {res.status_code}")
+        except Exception as e:
+            logger.error(f"[{username}] Sayfa {page} istek hatası: {e}")
+        return page, None
 
-async def fetch_user_films_fast(username: str) -> dict:
-    now = time.time()
+async def fetch_user_films_fast(username: str) -> Optional[dict[str, Optional[float]]]:
     if username in USER_CACHE:
-        cache_time, cached_data = USER_CACHE[username]
-        if now - cache_time < CACHE_TTL:
-            print(f"[{username}] Veriler önbellekten getirildi ({len(cached_data)} film).")
-            return cached_data
+        logger.info(f"[{username}] Bellekten yüklendi.")
+        return USER_CACHE[username]
 
     async with AsyncSession(impersonate="chrome124") as session:
         first_url = f"https://letterboxd.com/{username}/films/page/1/"
         try:
             res = await session.get(first_url, timeout=15.0)
             if res.status_code != 200:
-              print(f"[{username}] HTTP {res.status_code}")
-              print(f"[{username}] Headers: {dict(res.headers)}")
-              print(f"[{username}] Body: {res.text[:1000]}")
-              return {}
+                logger.error(f"[{username}] Profil getirilemedi: HTTP {res.status_code}")
+                return None
         except Exception as e:
-            print(f"[{username}] Bağlantı hatası: {e}")
-            return {}
+            logger.error(f"[{username}] Bağlantı hatası: {e}")
+            return None
 
         total_pages = extract_total_pages(res.text)
         all_films = parse_films_from_html(res.text)
-
-        print(f"[{username}] Toplam {total_pages} sayfa tespit edildi. Paralel çekim başlatılıyor...")
+        logger.info(f"[{username}] Tespit edilen toplam sayfa: {total_pages}")
 
         if total_pages > 1:
-            sem = asyncio.Semaphore(2)
+            sem = asyncio.Semaphore(3)
             tasks = [
                 fetch_single_page(session, username, p, sem)
                 for p in range(2, total_pages + 1)
             ]
             results = await asyncio.gather(*tasks)
-            for page_dict in results:
-                all_films.update(page_dict)
+            
+            for page_num, page_dict in results:
+                if page_dict is not None:
+                    all_films.update(page_dict)
+                else:
+                    logger.warning(f"[{username}] Sayfa {page_num} eksik çekildi.")
 
-    print(f"==> [{username}] Çekim tamamlandı: Toplam {len(all_films)} film.")
-    USER_CACHE[username] = (now, all_films)
+    logger.info(f"[{username}] Çekim tamamlandı: {len(all_films)} film.")
+    USER_CACHE[username] = all_films
     return all_films
 
 class MatchRequest(BaseModel):
@@ -365,37 +387,51 @@ async def api_match(payload: MatchRequest):
         if not u1 or not u2:
             return JSONResponse({"success": False, "message": "Kullanıcı adları boş bırakılamaz."})
 
-        print(f"\n--- Turbo Karşılaştırma Talebi: {u1} vs {u2} ---")
-        
         data1, data2 = await asyncio.gather(
             fetch_user_films_fast(u1),
             fetch_user_films_fast(u2)
         )
 
+        if data1 is None or data2 is None:
+            return JSONResponse({
+                "success": False, 
+                "message": "Kullanıcı verilerine erişilemedi. Profil gizlilik ayarlarını veya kullanıcı adlarını kontrol edin."
+            })
+
         set1, set2 = set(data1.keys()), set(data2.keys())
         if not set1 or not set2:
             return JSONResponse({
                 "success": False, 
-                "message": f"Kullanıcı verisi alınamadı. ({u1}: {len(set1)} film, {u2}: {len(set2)} film)"
+                "message": f"Katalog boş veya taranamadı. ({u1}: {len(set1)}, {u2}: {len(set2)})"
             })
 
         common = set1.intersection(set2)
-        min_size = min(len(set1), len(set2))
-        overlap_ratio = len(common) / min_size if min_size > 0 else 0.0
+        union = set1.union(set2)
+        
+        # Jaccard Benzerliği: |A ∩ B| / |A ∪ B|
+        jaccard_overlap = len(common) / len(union) if union else 0.0
 
         rated_common = [f for f in common if data1.get(f) is not None and data2.get(f) is not None]
+        
         if rated_common:
+            # Puan farkı normalize hesabı: Ortalamada farkın 4.5 puandan uzaklığı
             diffs = [abs(data1[f] - data2[f]) for f in rated_common]
-            rating_score = 1.0 - (sum(diffs) / (len(rated_common) * 4.5))
+            mean_diff = sum(diffs) / len(rated_common)
+            raw_rating_score = 1.0 - (mean_diff / 4.5)
+            
+            # Bayes/Laplace yumuşatması: Az sayıda ortak filmde puanın aşırı sapmasını regüle eder
+            weight = min(len(rated_common) / 10.0, 1.0)
+            rating_score = (raw_rating_score * weight) + (0.5 * (1.0 - weight))
         else:
             rating_score = 0.5
 
-        final_score = round((0.4 * overlap_ratio + 0.6 * rating_score) * 100, 1)
+        # Nihai uyum skoru: %35 katalog örtüşmesi, %65 ortak filmlerdeki puan benzerliği
+        final_score = round((0.35 * jaccard_overlap + 0.65 * rating_score) * 100, 1)
 
         return JSONResponse({
             "success": True,
             "score": final_score,
-            "overlap_pct": round(overlap_ratio * 100, 1),
+            "overlap_pct": round(jaccard_overlap * 100, 1),
             "rating_pct": round(rating_score * 100, 1),
             "common_count": len(common),
             "user1_total": len(set1),
@@ -405,7 +441,7 @@ async def api_match(payload: MatchRequest):
         })
 
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("Eşleştirme sürecinde beklenmeyen sunucu hatası:")
         return JSONResponse({"success": False, "message": f"Sunucu hatası: {str(e)}"})
 
 if __name__ == "__main__":
